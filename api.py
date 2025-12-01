@@ -1,3 +1,4 @@
+# api.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -8,7 +9,7 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# CORS liberado (depois dá pra restringir)
+# CORS liberado (depois você pode restringir)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -16,6 +17,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.get("/")
+def healthcheck():
+    return {"status": "ok", "message": "DR.M API rodando"}
 
 
 @app.post("/peticao")
@@ -30,3 +36,4 @@ def gerar_peticao(payload: StructuredInput):
         "passages": result["passages"],
         "attachments": result["attachments"],
     }
+
