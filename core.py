@@ -2,7 +2,6 @@ import os
 import io
 import json
 import re
-import uuid
 import base64
 from typing import List, Dict, Any, Optional
 
@@ -13,16 +12,12 @@ from rank_bm25 import BM25Okapi
 
 import pdfplumber
 from pypdf import PdfReader
-from docx import Document
-from docx.shared import Pt
-from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import A4
 
 import httpx
 from pydantic import BaseModel
 
 # =========================
-# Config (sem streamlit aqui)
+# Config via variáveis de ambiente
 # =========================
 DEFAULT_PROVIDER = os.getenv("LLM_PROVIDER", "sabia").lower()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
@@ -42,8 +37,9 @@ CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", 200))
 TOP_K = int(os.getenv("TOP_K", 6))
 USE_BM25 = (str(os.getenv("USE_BM25", "true")).lower() == "true")
 
+
 # =========================
-# Modelos de dados
+# Modelos de dados (Pydantic)
 # =========================
 class CaseParty(BaseModel):
     role: str
@@ -53,14 +49,17 @@ class CaseParty(BaseModel):
     address: Optional[str] = None
     emails: Optional[List[str]] = None
 
+
 class Claim(BaseModel):
     title: str
     type: str
     details: Optional[str] = None
 
+
 class CaseValue(BaseModel):
     currency: str
     value: float
+
 
 class CaseData(BaseModel):
     forum: str
@@ -70,8 +69,10 @@ class CaseData(BaseModel):
     case_value: Optional[CaseValue] = None
     urgency: bool = False
 
+
 class AgentConfig(BaseModel):
     temperature: float = 0.4
+
 
 class Agents(BaseModel):
     writer: AgentConfig
@@ -79,20 +80,24 @@ class Agents(BaseModel):
     reviewer_proc: AgentConfig
     reviewer_format: AgentConfig
 
+
 class Attachment(BaseModel):
     filename: str
-    content: str  # base64
+    content: str  # base64 do PDF
+
 
 class StructuredInput(BaseModel):
     case_data: CaseData
     agents: Agents
     attachments: List[Attachment] = []
 
+
 # =========================
 # Utils
 # =========================
 def normalize_text(s: str) -> str:
     return re.sub(r"\s+", " ", (s or "").replace("\x00", "")).strip()
+
 
 def chunk_text(text: str, size: int, overlap: int) -> List[str]:
     words = text.split()
@@ -104,6 +109,7 @@ def chunk_text(text: str, size: int, overlap: int) -> List[str]:
             break
         start = max(0, end - overlap)
     return chunks
+
 
 def read_pdf_text(file_bytes: bytes) -> str:
     # 1) pypdf
@@ -127,6 +133,7 @@ def read_pdf_text(file_bytes: bytes) -> str:
         pass
 
     return ""
+
 
 # =========================
 # VectorIndex (FAISS + BM25)
@@ -176,7 +183,7 @@ class VectorIndex:
             bmin, bmax = float(np.min(bm)), float(np.max(bm))
             denom = (bmax - bmin) or 1.0
             bm_norm = (bm - bmin) / denom
-            fused = {}
+            fused: Dict[int, Dict[str, Any]] = {}
             for r in vec_res:
                 idx = r["idx"]
                 r["score_fused"] = 0.5 * r["score_vec"] + 0.5 * float(bm_norm[idx])
@@ -192,12 +199,14 @@ class VectorIndex:
             )[:top_k]
         return vec_res[:top_k]
 
+
 # =========================
 # LLM Providers
 # =========================
 class LLMMessage(BaseModel):
     role: str
     content: str
+
 
 def sabia_chat(messages: List[LLMMessage], model: str, temperature: float, max_tokens: int) -> str:
     base = (SABIA_BASE_URL or "").strip()
@@ -222,6 +231,7 @@ def sabia_chat(messages: List[LLMMessage], model: str, temperature: float, max_t
     except Exception:
         return json.dumps(data, ensure_ascii=False)
 
+
 def openai_chat(messages: List[LLMMessage], model: str, temperature: float, max_tokens: int) -> str:
     key = (OPENAI_API_KEY or "").strip()
     if not key:
@@ -240,67 +250,66 @@ def openai_chat(messages: List[LLMMessage], model: str, temperature: float, max_
         data = r.json()
     return data["choices"][0]["message"]["content"]
 
+
 def llm_chat(provider: str, messages: List[LLMMessage], temperature: float, max_tokens: int) -> str:
     if provider == "gpt":
         return openai_chat(messages, MODEL_GPT, temperature, max_tokens)
     return sabia_chat(messages, MODEL_SABIA, temperature, max_tokens)
 
-# =========================
-# Prompts
-# =========================
-PROMPT_WRITER = """Você é um advogado sênior brasileiro. Redija uma PETIÇÃO completa... (igual ao seu)"""
-PROMPT_REVIEW_MERIT = """Você é um revisor jurídico focado em MÉRITO..."""
-PROMPT_REVIEW_PROC = """Você é um revisor jurídico focado em PROCEDIMENTO/FORMALIDADES..."""
-PROMPT_REVIEW_FORMAT = """Você é um revisor de FORMATAÇÃO..."""
 
 # =========================
-# Export helpers
+# Prompts (versões resumidas)
 # =========================
-def export_docx(text: str, passages: List[Dict[str, Any]], anexos: List[str]) -> bytes:
-    doc = Document()
-    style = doc.styles["Normal"]
-    style.font.name = "Calibri"
-    style.font.size = Pt(11)
-    doc.add_heading("Petição — Versão Final", level=1)
-    for para in text.split("\n\n"):
-        doc.add_paragraph(para)
+PROMPT_WRITER = """
+Você é um advogado sênior brasileiro. Redija uma PETIÇÃO completa e objetiva, com:
+1) Endereçamento
+2) Qualificação das partes
+3) Dos fatos
+4) Do direito
+5) Dos pedidos numerados
+6) Valor da causa
+7) Requerimentos finais
+8) Rol de documentos anexos
 
-    if anexos:
-        doc.add_heading("Rol de Documentos Anexos", level=2)
-        for a in anexos:
-            doc.add_paragraph(f"- {os.path.basename(a)}")
+Use linguagem técnica clara, cite trechos recuperados como [Fonte: <doc> <chunk_id>].
+Não invente fatos, baseie-se no resumo e nos trechos recuperados.
+Inclua tutela de urgência se houver urgência marcada.
+"""
 
-    if passages:
-        doc.add_heading("Apêndice — Trechos Recuperados (RAG)", level=2)
-        for p in passages:
-            doc.add_paragraph(f"[{p['chunk_id']}] {os.path.basename(p['doc_path'])}")
-            doc.add_paragraph(
-                p["text"][:1800] + ("..." if len(p["text"]) > 1800 else "")
-            )
+PROMPT_REVIEW_MERIT = """
+Você é um revisor jurídico focado em MÉRITO. Avalie criticamente a minuta.
+Responda em JSON:
+{
+ "issues": ["..."],
+ "suggested_fixes": ["..."],
+ "quality_notes": {"clareza":0-10,"aderencia":0-10,"riscos":"..."}
+}
+Seja específico e traga fundamentos, súmulas e precedentes quando possível.
+"""
 
-    mem = io.BytesIO()
-    doc.save(mem)
-    mem.seek(0)
-    return mem.read()
+PROMPT_REVIEW_PROC = """
+Você é um revisor jurídico focado em PROCEDIMENTO/FORMALIDADES.
+Verifique foro, qualificação, estrutura, pedidos, valor da causa e anexos.
+Responda em JSON:
+{
+ "issues": ["..."],
+ "suggested_fixes": ["..."],
+ "quality_notes": {"conformidade":0-10,"riscos_processuais":"..."}
+}
+"""
 
-def export_pdf(text: str) -> bytes:
-    mem = io.BytesIO()
-    c = canvas.Canvas(mem, pagesize=A4)
-    width, height = A4
-    x, y = 50, height - 50
-    for line in text.split("\n"):
-        if y < 60:
-            c.showPage()
-            y = height - 50
-        c.drawString(x, y, line[:110])
-        y -= 14
-    c.showPage()
-    c.save()
-    mem.seek(0)
-    return mem.read()
+PROMPT_REVIEW_FORMAT = """
+Você é um revisor de FORMATAÇÃO. Ajuste a minuta para:
+- Cabeçalhos claros
+- Parágrafos bem separados
+- Numeração adequada
+- Preservar citações [Fonte: <doc> <chunk_id>]
+Responda apenas com o TEXTO FINAL formatado, sem comentários.
+"""
+
 
 # =========================
-# FUNÇÃO PRINCIPAL (para Streamlit e API)
+# Função principal
 # =========================
 def generate_petition(
     structured: StructuredInput,
@@ -317,10 +326,10 @@ def generate_petition(
     t_format = agents.reviewer_format.temperature
 
     vindex = VectorIndex(EMBEDDING_MODEL)
-    all_passages: List[Dict[str, Any]] = []
     anexos_nomes: List[str] = []
     warnings: List[str] = []
 
+    # 1) Ingestão RAG
     if attachments:
         for att in attachments:
             try:
@@ -344,9 +353,9 @@ def generate_petition(
                     "idx": len(vindex.doc_meta) + i
                 })
             vindex.add([m["text"] for m in metas], metas)
-            all_passages.extend(metas)
             anexos_nomes.append(att.filename)
 
+    # 2) Query para RAG
     claims_texts = []
     for c in case.claims:
         base = c.title
@@ -357,6 +366,7 @@ def generate_petition(
     query = case.facts_summary + " " + " ".join(claims_texts)
     passages = vindex.search(query, top_k=top_k) if vindex.doc_meta else []
 
+    # 3) Resumo textual
     plaintiffs = [p for p in case.parties if p.role.lower() == "plaintiff"]
     defendants = [p for p in case.parties if p.role.lower() == "defendant"]
 
@@ -399,6 +409,7 @@ URGÊNCIA: {'SIM' if case.urgency else 'NÃO'}
         [f"- [{p['chunk_id']}] '{p['doc_path']}': {p['text'][:800]}..." for p in passages]
     ) or "(Nenhum trecho recuperado)"
 
+    # 4) Writer
     draft = llm_chat(
         provider,
         [
@@ -415,6 +426,7 @@ URGÊNCIA: {'SIM' if case.urgency else 'NÃO'}
         max_tokens=2200,
     )
 
+    # 5) Reviewer Mérito
     rev_merit_raw = llm_chat(
         provider,
         [
@@ -433,6 +445,7 @@ URGÊNCIA: {'SIM' if case.urgency else 'NÃO'}
             "quality_notes": {"raw": rev_merit_raw[:800]},
         }
 
+    # 6) Reviewer Procedimento
     rev_proc_raw = llm_chat(
         provider,
         [
@@ -451,14 +464,15 @@ URGÊNCIA: {'SIM' if case.urgency else 'NÃO'}
             "quality_notes": {"raw": rev_proc_raw[:800]},
         }
 
+    # 7) Reviewer Formatação
     payload_format = f"""
 MINUTA:
 {draft}
 
-REVISOR MÉRITO (issues/sugestões):
+REVISOR MÉRITO:
 {json.dumps(rev_merit, ensure_ascii=False)}
 
-REVISOR PROCEDIMENTO (issues/sugestões):
+REVISOR PROCEDIMENTO:
 {json.dumps(rev_proc, ensure_ascii=False)}
 """
     final_formatted = llm_chat(
@@ -471,9 +485,6 @@ REVISOR PROCEDIMENTO (issues/sugestões):
         max_tokens=2200,
     )
 
-    docx_bytes = export_docx(final_formatted, passages, anexos_nomes)
-    pdf_bytes = export_pdf(final_formatted)
-
     return {
         "warnings": warnings,
         "draft": draft,
@@ -482,6 +493,4 @@ REVISOR PROCEDIMENTO (issues/sugestões):
         "final_text": final_formatted,
         "passages": passages,
         "attachments": anexos_nomes,
-        "docx_bytes": docx_bytes,
-        "pdf_bytes": pdf_bytes,
     }
