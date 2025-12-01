@@ -8,23 +8,19 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# opcional: CORS liberado para o front dele
+# CORS liberado (depois dá pra restringir)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # depois dá pra restringir
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+
 @app.post("/peticao")
 def gerar_peticao(payload: StructuredInput):
-    """
-    Recebe o mesmo JSON que o Streamlit usa e devolve
-    o pipeline multiagente (sem DOCX/PDF se não quiser).
-    """
     result = generate_petition(payload)
-    # se quiser pode remover docx_bytes/pdf_bytes da resposta
     return {
         "warnings": result["warnings"],
         "draft": result["draft"],
