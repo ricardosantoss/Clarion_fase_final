@@ -1,16 +1,19 @@
-fastapi==0.123.0
-uvicorn[standard]==0.38.0
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+python-multipart==0.0.9
 
-numpy>=1.26.0
+# NLP e Vetores
+numpy<2.0.0
+# Forçamos versões compatíveis e leves
+sentence-transformers>=2.3.1
+torch --index-url https://download.pytorch.org/whl/cpu
 faiss-cpu>=1.7.4
-sentence-transformers>=2.6.1
 rank_bm25>=0.2.2
 
-pdfplumber>=0.11.4
-pypdf>=4.2.0
+# PDF
+pdfplumber>=0.10.3
+pypdf>=4.0.0
 
-httpx>=0.28.1
-pydantic>=2.7.0
-
-
-pydantic==2.12.5
+# Utils
+httpx>=0.26.0
+pydantic>=2.6.0
