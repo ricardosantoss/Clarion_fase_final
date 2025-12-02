@@ -263,19 +263,25 @@ def llm_chat(provider: str, messages: List[LLMMessage], temperature: float, max_
 # Prompts (versões resumidas)
 # =========================
 PROMPT_WRITER = """
-Você é um advogado sênior brasileiro. Redija uma PETIÇÃO completa e objetiva, com:
-1) Endereçamento
-2) Qualificação das partes
-3) Dos fatos
-4) Do direito
-5) Dos pedidos numerados
-6) Valor da causa
-7) Requerimentos finais
+Você é um advogado sênior brasileiro. Redija uma PETIÇÃO extremamente detalhada, 
+aprofundada e robusta, contendo:
+
+1) Endereçamento completo
+2) Qualificação detalhada das partes
+3) Exposição minuciosa dos fatos, com contextualização jurídica
+4) Fundamentação jurídica extensa, incluindo:
+   - doutrina relevante,
+   - jurisprudência atualizada dos Tribunais Superiores,
+   - interpretação sistemática das normas.
+5) Pedidos numerados com argumentação extensa
+6) Valor da causa e justificativa
+7) Requerimentos finais completos
 8) Rol de documentos anexos
 
-Use linguagem técnica clara, cite trechos recuperados como [Fonte: <doc> <chunk_id>].
-Não invente fatos, baseie-se no resumo e nos trechos recuperados.
-Inclua tutela de urgência se houver urgência marcada.
+Use linguagem jurídica refinada e altamente técnica.
+Desenvolva parágrafos longos e bem articulados.
+Aumente a profundidade da análise jurídica.
+Inclua fundamentos constitucionais, civis e processuais sempre que pertinente.
 """
 
 PROMPT_REVIEW_MERIT = """
@@ -425,7 +431,7 @@ URGÊNCIA: {'SIM' if case.urgency else 'NÃO'}
             )
         ],
         temperature=t_writer,
-        max_tokens=2200,
+        max_tokens=10000,
     )
 
     # 5) Reviewer Mérito
@@ -484,7 +490,7 @@ REVISOR PROCEDIMENTO:
             LLMMessage(role="user", content=payload_format),
         ],
         temperature=t_format,
-        max_tokens=2200,
+        max_tokens=8000,
     )
 
     return {
